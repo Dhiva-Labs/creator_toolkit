@@ -1,0 +1,380 @@
+name: Desktop builds
+
+# Builds, tests and packages the Linux and Windows desktop apps, each on a
+# native runner: Flutter cannot cross-compile either desktop target, so every
+# architecture is built on a machine of that architecture. The Android app is
+# not built here.
+#
+# Every run keeps the packages as workflow artifacts. When a GitHub release is
+# published, the release job attaches the packages of both architectures to it
+# and skips every asset the release already has.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The Flutter release Creator Toolkit is developed with (Dart ^3.12.2). There
+  # are no Flutter SDK archives for linux-arm64 or windows-arm64, so every leg
+  # installs the SDK the same way: a shallow clone of the release tag.
+  FLUTTER_VERSION: '3.44.6'
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+            elf_machine: x86-64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            elf_machine: ARM aarch64
+    env:
+      BUNDLE: build/linux/${{ matrix.arch }}/release/bundle
+      ELF_MACHINE: ${{ matrix.elf_machine }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # ffmpeg: the video and audio tools shell out to the system binary on
+      # desktop, and test/services_test.dart skips its FFmpeg pipelines without
+      # one. xvfb, xauth, xdotool, dbus-x11: the smoke run of the app.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev \
+            ffmpeg file xvfb xauth xdotool dbus-x11
+
+      - name: Install Flutter ${{ env.FLUTTER_VERSION }}
+        run: |
+          git clone --depth 1 --branch "$FLUTTER_VERSION" \
+            https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+
+      - name: Configure Flutter
+        run: |
+          uname -m
+          flutter config --no-analytics --enable-linux-desktop
+          flutter precache --linux
+          flutter --version
+          dart --version
+          ffmpeg -version | head -n 1
+
+      - name: Get packages
+        run: flutter pub get
+
+      - name: Test
+        run: flutter test
+
+      - name: Build release
+        run: flutter build linux --release
+
+      - name: Assert every ELF file in the bundle is ${{ matrix.elf_machine }}
+        run: |
+          for f in creator_toolkit lib/libapp.so lib/libflutter_linux_gtk.so; do
+            [ -f "$BUNDLE/$f" ] || { echo "::error::missing $BUNDLE/$f"; exit 1; }
+          done
+          checked=0
+          bad=0
+          while IFS= read -r -d '' f; do
+            desc="$(file -b "$f")"
+            case "$desc" in ELF*) ;; *) continue ;; esac
+            echo "$f: $desc"
+            checked=$((checked + 1))
+            case "$desc" in
+              *"$ELF_MACHINE"*) ;;
+              *) echo "::error file=$f::not $ELF_MACHINE"; bad=1 ;;
+            esac
+          done < <(find "$BUNDLE" -type f -print0)
+          echo "checked $checked ELF files"
+          [ "$checked" -ge 3 ] && [ "$bad" -eq 0 ]
+
+      - name: Package tarball
+        run: tool/build_tarball.sh dist
+
+      - name: Check the tarball
+        run: |
+          VERSION="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)"
+          NAME="CreatorToolkit-${VERSION}-linux-${{ matrix.arch }}"
+          ls -l dist
+          [ "$(ls dist | wc -l)" -eq 1 ]
+          tar -xzf "dist/$NAME.tar.gz" -C "$RUNNER_TEMP"
+          file "$RUNNER_TEMP/$NAME/creator_toolkit" | grep "$ELF_MACHINE"
+
+      # Starts the app from the tarball under Xvfb. The GTK runner shows its
+      # window only when Flutter has rendered the first frame, so a visible
+      # "Creator Toolkit" window means the AOT snapshot ran on this
+      # architecture.
+      - name: Smoke-run the packaged app (Xvfb)
+        timeout-minutes: 5
+        run: |
+          VERSION="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)"
+          export APP="$RUNNER_TEMP/CreatorToolkit-${VERSION}-linux-${{ matrix.arch }}/creator_toolkit"
+          cat > "$RUNNER_TEMP/smoke.sh" <<'EOF'
+          log="$RUNNER_TEMP/smoke.log"
+          "$APP" > "$log" 2>&1 &
+          pid=$!
+          for i in $(seq 1 90); do
+            if xdotool search --onlyvisible --name '^Creator Toolkit$' > /dev/null 2>&1; then
+              echo "Creator Toolkit window is up after ${i}s"
+              sleep 5
+              kill -0 "$pid" || { echo "creator_toolkit died after showing its window"; cat "$log"; exit 1; }
+              kill "$pid"
+              cat "$log"
+              exit 0
+            fi
+            kill -0 "$pid" 2> /dev/null || { echo "creator_toolkit exited early"; cat "$log"; exit 1; }
+            sleep 1
+          done
+          echo "no visible Creator Toolkit window after 90s"
+          cat "$log"
+          exit 1
+          EOF
+          xvfb-run -a -s "-screen 0 1280x800x24" dbus-run-session -- bash "$RUNNER_TEMP/smoke.sh"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  windows:
+    name: Windows ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+            pe_machine: '0x8664'
+            elf_machine: '0x3E'
+          - arch: arm64
+            runner: windows-11-arm
+            pe_machine: '0xAA64'
+            elf_machine: '0xB7'
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      ARCH: ${{ matrix.arch }}
+      RELEASE_DIR: build\windows\${{ matrix.arch }}\runner\Release
+      # PE COFF machine of every .exe/.dll, and ELF e_machine of the AOT
+      # snapshot (data\app.so is an ELF file on Windows too).
+      PE_MACHINE: ${{ matrix.pe_machine }}
+      ELF_MACHINE: ${{ matrix.elf_machine }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # On an ARM64 host (PROCESSOR_ARCHITECTURE=ARM64) the bootstrap fetches
+      # the arm64 Dart SDK and `flutter build windows` targets windows-arm64.
+      - name: Install Flutter ${{ env.FLUTTER_VERSION }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          git clone --depth 1 --branch $env:FLUTTER_VERSION `
+            https://github.com/flutter/flutter.git "$env:RUNNER_TEMP\flutter"
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:RUNNER_TEMP\flutter\bin"
+
+      - name: Configure Flutter
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          "PROCESSOR_ARCHITECTURE=$env:PROCESSOR_ARCHITECTURE"
+          flutter config --no-analytics --enable-windows-desktop
+          flutter precache --windows
+          flutter --version
+          dart --version
+
+      # The Windows images have no ffmpeg. The app runs the system ffmpeg on
+      # desktop, and test/services_test.dart (the WEBP conversion and the
+      # FFmpeg pipelines) needs one on PATH. The x64 build is used on both
+      # legs: BtbN's native arm64 build lacks libvpx (the WEBM test fails with
+      # "Unrecognized option 'row-mt'"), and Windows on ARM runs the x64 one
+      # under emulation.
+      - name: Install ffmpeg
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $asset = 'ffmpeg-n8.1-latest-win64-gpl-8.1.zip'
+          gh release download latest --repo BtbN/FFmpeg-Builds --pattern $asset --dir $env:RUNNER_TEMP
+          Expand-Archive -Path "$env:RUNNER_TEMP\$asset" -DestinationPath "$env:RUNNER_TEMP\ffmpeg"
+          $bin = Join-Path (Get-ChildItem "$env:RUNNER_TEMP\ffmpeg" -Directory | Select-Object -First 1).FullName 'bin'
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+          & "$bin\ffmpeg.exe" -version | Select-Object -First 1
+
+      - name: Get packages
+        run: flutter pub get
+
+      # ffmpeg_kit_flutter_new is the Android FFmpeg; the desktop code never
+      # calls it. Its Windows plugin downloads prebuilt x86_64 DLLs, which do
+      # not exist for arm64 and which CMake cannot extract on the runners even
+      # on x64 ("Cannot extract through symlink"). See the script for details.
+      - name: Build without the ffmpeg-kit Windows plugin
+        run: ./tool/strip_ffmpeg_kit_windows.ps1
+
+      - name: Test
+        run: flutter test
+
+      - name: Build release
+        run: flutter build windows --release
+
+      - name: Assert every PE file is ${{ matrix.pe_machine }}
+        run: |
+          function Get-PeMachine([string]$Path) {
+            $fs = [IO.File]::OpenRead($Path)
+            try {
+              $br = New-Object IO.BinaryReader($fs)
+              $fs.Position = 0x3C
+              $fs.Position = $br.ReadInt32()
+              if ($br.ReadUInt32() -ne 0x4550) { throw "$Path is not a PE file" }
+              return $br.ReadUInt16()
+            } finally { $fs.Dispose() }
+          }
+          $expected = [Convert]::ToUInt16($env:PE_MACHINE, 16)
+          $files = Get-ChildItem -Path $env:RELEASE_DIR -Recurse -File -Include *.exe, *.dll
+          if (-not ($files.Name -contains 'creator_toolkit.exe') -or -not ($files.Name -contains 'flutter_windows.dll')) {
+            throw "creator_toolkit.exe or flutter_windows.dll missing from $env:RELEASE_DIR"
+          }
+          $bad = 0
+          foreach ($f in $files) {
+            $m = Get-PeMachine $f.FullName
+            '{0,-50} 0x{1:X4}' -f $f.Name, $m
+            if ($m -ne $expected) { Write-Host "::error file=$($f.FullName)::machine 0x$('{0:X4}' -f $m), expected $env:PE_MACHINE"; $bad++ }
+          }
+          $bytes = [IO.File]::ReadAllBytes("$env:RELEASE_DIR\data\app.so")
+          $elf = [BitConverter]::ToUInt16($bytes, 0x12)
+          'data\app.so ELF e_machine 0x{0:X2}' -f $elf
+          if ($elf -ne [Convert]::ToUInt16($env:ELF_MACHINE, 16)) { Write-Host "::error::app.so is not $env:ELF_MACHINE"; $bad++ }
+          "checked $($files.Count) PE files and app.so"
+          if ($bad) { exit 1 }
+
+      # The runner shows its window only when Flutter has rendered the first
+      # frame (MainWindowHandle is 0 until then), so a window means the AOT
+      # snapshot ran on this architecture.
+      - name: Smoke-run the release build
+        timeout-minutes: 5
+        run: |
+          $p = Start-Process -FilePath "$env:RELEASE_DIR\creator_toolkit.exe" -PassThru
+          $up = $false
+          for ($i = 1; $i -le 90; $i++) {
+            Start-Sleep -Seconds 1
+            $p.Refresh()
+            if ($p.HasExited) { throw "creator_toolkit.exe exited early with code $($p.ExitCode)" }
+            if ($p.MainWindowHandle -ne 0) {
+              "window '$($p.MainWindowTitle)' is up after ${i}s"
+              $up = $true
+              break
+            }
+          }
+          if (-not $up) {
+            Stop-Process -Id $p.Id -Force
+            throw "no window after 90 s (window handle $($p.MainWindowHandle))"
+          }
+          Start-Sleep -Seconds 5
+          $p.Refresh()
+          if ($p.HasExited) { throw "creator_toolkit.exe died after showing its window (code $($p.ExitCode))" }
+          Stop-Process -Id $p.Id -Force
+
+      - name: Package zip
+        run: ./tool/package_windows.ps1 -OutDir dist
+
+      - name: Check the package
+        run: |
+          function Get-PeMachine([string]$Path) {
+            $fs = [IO.File]::OpenRead($Path)
+            try {
+              $br = New-Object IO.BinaryReader($fs)
+              $fs.Position = 0x3C
+              $fs.Position = $br.ReadInt32()
+              if ($br.ReadUInt32() -ne 0x4550) { throw "$Path is not a PE file" }
+              return $br.ReadUInt16()
+            } finally { $fs.Dispose() }
+          }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $expected = [Convert]::ToUInt16($env:PE_MACHINE, 16)
+          $version = ((Select-String -Path pubspec.yaml -Pattern '^version:\s*(\S+)').Matches[0].Groups[1].Value -split '\+')[0]
+          $zipName = "CreatorToolkit-$version-windows-$env:ARCH"
+          Get-ChildItem dist | Format-Table Name, Length
+          if ((Get-ChildItem dist).Count -ne 1) { throw 'expected exactly one zip in dist' }
+          $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path "dist\$zipName.zip"))
+          try {
+            $entry = $zip.GetEntry("$zipName/creator_toolkit.exe")
+            if (-not $entry) { throw "$zipName/creator_toolkit.exe not in the zip" }
+            $tmp = Join-Path $env:RUNNER_TEMP 'zip_creator_toolkit.exe'
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $tmp, $true)
+            $m = Get-PeMachine $tmp
+            'zip: {0} entries, creator_toolkit.exe 0x{1:X4}' -f $zip.Entries.Count, $m
+            if ($m -ne $expected) { throw 'zip holds the wrong architecture' }
+          } finally { $zip.Dispose() }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-${{ matrix.arch }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Release assets
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: pubspec.yaml
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: '*-*'
+          path: assets
+          merge-multiple: true
+
+      - name: Select the release assets
+        id: select
+        run: |
+          VERSION="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)"
+          FILES=""
+          for arch in x64 arm64; do
+            FILES="$FILES assets/CreatorToolkit-${VERSION}-linux-${arch}.tar.gz assets/CreatorToolkit-${VERSION}-windows-${arch}.zip"
+          done
+          ls -l assets
+          ls -l $FILES
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
+
+      # Skips an asset when the release already has it (matched by name), so a
+      # hand-uploaded file always wins and nothing is overwritten.
+      - name: Upload to release ${{ github.event.release.tag_name }}
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          FILES: ${{ steps.select.outputs.files }}
+        run: |
+          existing="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          for f in $FILES; do
+            if grep -qxF "$(basename "$f")" <<< "$existing"; then
+              echo "$(basename "$f") is already attached to $TAG, leaving it alone"
+            else
+              gh release upload "$TAG" "$f" --repo "$GITHUB_REPOSITORY"
+            fi
+          done
