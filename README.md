@@ -40,8 +40,9 @@ per-job progress with before → after file sizes.
 
 ## Download
 
-GitHub releases published after the CI workflow was added carry the desktop
-builds, and every CI run keeps them as workflow artifacts:
+GitHub releases carry the desktop builds, attached by the CI workflow, and
+every CI run keeps them as workflow artifacts. The Android APK is not part of a
+release:
 
 | Platform      | File                                          |
 |---------------|-----------------------------------------------|
