@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.dhivalabs.creator_toolkit</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <name>Creator Toolkit</name>
+  <summary>Compress, resize and convert images, video, audio and PDFs for sharing</summary>
+  <description>
+    <p>Creator Toolkit helps content creators optimize and convert media
+    before sharing it online. Fully offline.</p>
+    <ul>
+      <li>Images: compress, resize, crop to an aspect ratio, convert (JPG, PNG, WEBP)</li>
+      <li>Video: compress, convert (MP4, MKV, MOV, WEBM, GIF), trim</li>
+      <li>Audio: compress, convert (MP3, M4A, WAV, FLAC, OGG)</li>
+      <li>PDF: compress, merge, split</li>
+      <li>Social media presets for Instagram, YouTube, TikTok and Facebook</li>
+    </ul>
+    <p>Results are saved to the CreatorToolkit folder in your home folder.
+    This package includes FFmpeg for the video and audio tools.</p>
+  </description>
+  <launchable type="desktop-id">com.dhivalabs.creator_toolkit.desktop</launchable>
+  <provides>
+    <binary>creator-toolkit</binary>
+  </provides>
+  <url type="homepage">https://github.com/Dhiva-Labs/creator_toolkit</url>
+  <url type="bugtracker">https://github.com/Dhiva-Labs/creator_toolkit/issues</url>
+  <developer id="com.dhivalabs">
+    <name>Dhiva Labs</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.0.0" date="2026-10-16"/>
+  </releases>
+</component>

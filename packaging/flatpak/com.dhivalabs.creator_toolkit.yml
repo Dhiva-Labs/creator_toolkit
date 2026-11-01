@@ -1,0 +1,110 @@
+# Flatpak manifest for Creator Toolkit.
+#
+# Like the .rpm, Arch package and AppImage, the app module repackages the
+# installed tree CI stages from the release bundle (unpacked into
+# packaging/flatpak/tree/ by the workflow), so the Flatpak ships the same
+# binary as every other format. A Flathub submission needs `tree` swapped
+# for an archive source (release URL + sha256); see README.md here.
+#
+# The video and audio tools, and WEBP output, run the `ffmpeg` and `ffprobe`
+# programs (lib/services/ffmpeg_service.dart). The runtime's own FFmpeg is
+# built without the patented codecs (no H.264 or HEVC decoding, no x264),
+# so it cannot read most phone videos or write the app's MP4s, and the
+# codecs-extra extension (formerly ffmpeg-full) adds libraries only, no
+# programs (freedesktop-sdk builds it with --disable-programs). So FFmpeg is
+# built here with all of its decoders and the encoders the app asks for:
+# libx264 + aac (MP4/MKV/MOV), libvpx-vp9 + libopus (WEBM), libmp3lame,
+# libvorbis, flac, pcm, gif and libwebp. LAME, libvpx, opus, vorbis and
+# libwebp come from the runtime; x264 is built below. The result is
+# GPL-2.0-or-later (x264); README.md says what that means for distributing
+# the bundle.
+id: com.dhivalabs.creator_toolkit
+runtime: org.gnome.Platform
+runtime-version: '51'
+sdk: org.gnome.Sdk
+command: creator-toolkit
+finish-args:
+  # GTK needs a display socket; fallback-x11 covers X11-only desktops.
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # GPU acceleration for Flutter's renderer.
+  - --device=dri
+  # Results go to ~/CreatorToolkit, as on every other build. Input files
+  # come from the file chooser portal (file_picker) or drag and drop, both
+  # of which hand the sandbox the files the user picked.
+  - --filesystem=~/CreatorToolkit:create
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /share/man
+  - /share/doc
+  - '*.a'
+  - '*.la'
+modules:
+  # x264's and FFmpeg's x86 assembly; a build tool only.
+  - name: nasm
+    only-arches:
+      - x86_64
+    cleanup:
+      - '*'
+    sources:
+      - type: archive
+        url: https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/nasm-2.16.03.tar.xz
+        sha256: 1412a1c760bbd05db026b6c0d1657affd6631cd0a63cddb6f73cc6d4aa616148
+
+  - name: x264
+    config-opts:
+      - --enable-shared
+      - --enable-pic
+      - --disable-cli
+    sources:
+      - type: git
+        url: https://code.videolan.org/videolan/x264.git
+        # The stable branch, 2026-11-01.
+        commit: b35605ace3ddf7c1a5d67a2eb553f034aef41d55
+
+  # Static libav* inside the two programs, so nothing here can be mistaken
+  # for (or shadow) the runtime's own libavcodec.
+  - name: ffmpeg
+    config-opts:
+      - --enable-gpl
+      - --enable-libx264
+      - --enable-libmp3lame
+      - --enable-libvpx
+      - --enable-libopus
+      - --enable-libvorbis
+      - --enable-libwebp
+      - --disable-ffplay
+      - --disable-avdevice
+      - --disable-network
+      - --disable-doc
+      - --disable-debug
+    cleanup:
+      - /share/ffmpeg
+    sources:
+      - type: archive
+        url: https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
+        sha256: 8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
+
+  - name: creator-toolkit
+    buildsystem: simple
+    sources:
+      - type: dir
+        path: tree
+        dest: tree
+      - type: file
+        path: com.dhivalabs.creator_toolkit.metainfo.xml
+    build-commands:
+      # Flutter finds lib/ and data/ next to its executable.
+      - install -d /app/lib /app/bin
+      - cp -a tree/usr/lib/creator-toolkit /app/lib/creator-toolkit
+      - ln -s ../lib/creator-toolkit/creator_toolkit /app/bin/creator-toolkit
+      # The desktop entry is already named after the app id (and GTK
+      # application id); Flatpak only exports icons named after it too.
+      - install -Dm644 tree/usr/share/applications/com.dhivalabs.creator_toolkit.desktop
+        /app/share/applications/com.dhivalabs.creator_toolkit.desktop
+      - desktop-file-edit --set-icon=com.dhivalabs.creator_toolkit /app/share/applications/com.dhivalabs.creator_toolkit.desktop
+      - for png in tree/usr/share/icons/hicolor/*/apps/creator-toolkit.png; do size="${png#tree/usr/share/icons/hicolor/}";
+        install -Dm644 "$png" "/app/share/icons/hicolor/${size%%/*}/apps/com.dhivalabs.creator_toolkit.png"; done
+      - install -Dm644 com.dhivalabs.creator_toolkit.metainfo.xml /app/share/metainfo/com.dhivalabs.creator_toolkit.metainfo.xml
