@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Creator Toolkit
+GenericName=Media optimizer
+Comment=Compress, resize and convert images, video, audio and PDFs for sharing
+Exec=creator-toolkit
+Icon=creator-toolkit
+Terminal=false
+Categories=AudioVideo;AudioVideoEditing;
+Keywords=compress;convert;resize;video;audio;image;pdf;webp;gif;ffmpeg;
+StartupWMClass=com.dhivalabs.creator_toolkit

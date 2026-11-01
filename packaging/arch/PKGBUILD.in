@@ -1,0 +1,49 @@
+# Maintainer: Dhiva Labs <dhivakar1010@gmail.com>
+#
+# AUR package. It repackages the Linux tarball from the GitHub release, so
+# Arch users run the same build as every other distribution, laid out as
+# packaging/linux-distros/stage-tree.sh lays out the other packages. The
+# desktop entry and icons ship next to this PKGBUILD. packaging/arch/aur.sh
+# renders this file for each release (version and checksums) and checks it
+# with makepkg; the rendered files are what gets pushed to the AUR.
+pkgname=@NAME@-bin
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc='@SUMMARY@'
+arch=('x86_64' 'aarch64')
+url='@HOMEPAGE@'
+license=('@LICENSE@')
+depends=(@ARCH_DEPENDS@)
+optdepends=(@ARCH_OPTDEPENDS@)
+provides=('@NAME@')
+conflicts=('@NAME@')
+options=('!strip' '!debug')
+source=('com.dhivalabs.creator_toolkit.desktop' @ICON_FILES@)
+source_x86_64=("@RELEASE_URL@/@TARBALL_X64@")
+source_aarch64=("@RELEASE_URL@/@TARBALL_ARM64@")
+sha256sums=(@SHA_COMMON@)
+sha256sums_x86_64=('@SHA_X64@')
+sha256sums_aarch64=('@SHA_ARM64@')
+
+package() {
+  local flutter_arch
+  case "$CARCH" in
+    x86_64) flutter_arch=x64 ;;
+    aarch64) flutter_arch=arm64 ;;
+  esac
+  install -d "$pkgdir/usr/lib/@NAME@" "$pkgdir/usr/bin"
+  cp -a "CreatorToolkit-$pkgver-linux-$flutter_arch/." "$pkgdir/usr/lib/@NAME@/"
+  # The jni plugin's libdartjni.so (an Android dependency, built only
+  # because the CI runner has a JDK) links that runner's libjvm.so and is
+  # never loaded on desktop Linux; the other packages leave it out too.
+  rm -f "$pkgdir/usr/lib/@NAME@/lib/libdartjni.so"
+  ln -s ../lib/@NAME@/creator_toolkit "$pkgdir/usr/bin/@NAME@"
+  install -Dm644 com.dhivalabs.creator_toolkit.desktop \
+    "$pkgdir/usr/share/applications/com.dhivalabs.creator_toolkit.desktop"
+  local png size
+  for png in @NAME@-*.png; do
+    size="${png##*-}"
+    size="${size%.png}"
+    install -Dm644 "$png" "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/@NAME@.png"
+  done
+}

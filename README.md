@@ -3,6 +3,7 @@
 [![ARM64 builds](https://github.com/Dhiva-Labs/creator_toolkit/actions/workflows/desktop.yml/badge.svg?branch=main)](https://github.com/Dhiva-Labs/creator_toolkit/actions/workflows/desktop.yml)
 ![Linux x64 | arm64](https://img.shields.io/badge/Linux-x64%20%7C%20arm64-informational?logo=linux&logoColor=white)
 ![Windows x64 | arm64](https://img.shields.io/badge/Windows-x64%20%7C%20arm64-informational?logo=windows&logoColor=white)
+![Linux: tar.gz | rpm | Arch | AppImage | Flatpak](https://img.shields.io/badge/Linux-tar.gz%20%7C%20rpm%20%7C%20Arch%20%7C%20AppImage%20%7C%20Flatpak-informational?logo=linux&logoColor=white)
 
 A simple, modern Flutter app that helps content creators optimize and convert
 media before sharing it online. Runs on **Linux (x64, arm64), Windows (x64,
@@ -55,6 +56,39 @@ Unpack and run `creator_toolkit` (`creator_toolkit.exe` on Windows). The video
 and audio tools need `ffmpeg` on PATH (Windows: for example
 `winget install Gyan.FFmpeg`).
 
+### Linux packages
+
+From the next release on, releases also carry packages for Linux
+distributions, built from the same binaries as the tarball (`x86_64` and
+`aarch64`):
+
+| Distribution | Asset | Install |
+|---|---|---|
+| Fedora, RHEL/Rocky/Alma | `creator-toolkit-<version>-1.<arch>.rpm` | `sudo dnf install ./creator-toolkit-<version>-1.<arch>.rpm` |
+| openSUSE Tumbleweed | `creator-toolkit-<version>-1.<arch>.rpm` | `sudo zypper install --allow-unsigned-rpm ./creator-toolkit-<version>-1.<arch>.rpm` |
+| Arch, Manjaro, EndeavourOS | `creator-toolkit-<version>-1-<arch>.pkg.tar.zst` | `sudo pacman -U ./creator-toolkit-<version>-1-<arch>.pkg.tar.zst` |
+| Any (AppImage) | `CreatorToolkit-<version>-<arch>.AppImage` | `chmod +x CreatorToolkit-<version>-<arch>.AppImage && ./CreatorToolkit-<version>-<arch>.AppImage` |
+| Any (Flatpak) | `creator-toolkit-<version>-<arch>.flatpak` | `flatpak install --user ./creator-toolkit-<version>-<arch>.flatpak` |
+
+- The binaries are built on Ubuntu 24.04, so they need glibc 2.39 or newer:
+  Fedora 40+, openSUSE Tumbleweed and current Arch, but not openSUSE Leap 15
+  or RHEL 9. The AppImage uses the system's GTK 3 and ffmpeg.
+- **ffmpeg:** the `.rpm` pulls in the distribution's ffmpeg as a weak
+  dependency, and on Arch it is an optional dependency (`sudo pacman -S
+  ffmpeg`). Fedora's own `ffmpeg-free` and openSUSE's `ffmpeg` leave out the
+  patent-encumbered H.264 encoder (libx264) that video compression and
+  MP4/MKV/MOV output use; install the full ffmpeg from RPM Fusion (Fedora)
+  or Packman (openSUSE) for those. Arch's ffmpeg includes it.
+- The **Flatpak** includes its own ffmpeg with every codec the app uses, so it
+  needs nothing else. It uses the GNOME 51 runtime from Flathub: add the
+  Flathub remote first (`flatpak remote-add --user --if-not-exists flathub
+  https://dl.flathub.org/repo/flathub.flatpakrepo`). It opens files through
+  the file chooser (or drag and drop) and writes only to `~/CreatorToolkit`.
+- The `.rpm` files are unsigned (hence `--allow-unsigned-rpm` on openSUSE).
+- Arch users can build `creator-toolkit-bin` from the AUR recipe attached to
+  each release (`creator-toolkit-bin-<version>-aur.tar.gz`: PKGBUILD,
+  .SRCINFO, desktop entry and icons).
+
 ## Build
 
 ```bash
@@ -70,7 +104,12 @@ machine (`build/linux/arm64/...`, `build\windows\arm64\...`) with the same
 commands. The **Desktop builds** workflow (`.github/workflows/desktop.yml`)
 does that on native runners for Linux x64, Linux arm64, Windows x64 and
 Windows arm64: tests, release build, packaging (`tool/build_tarball.sh`,
-`tool/package_windows.ps1`) and a start-up check of the built app.
+`tool/package_windows.ps1`) and a start-up check of the built app. The Linux
+packages (`packaging/`) are installed and run too: the `.rpm` on Fedora and
+openSUSE Tumbleweed, the Arch package on Arch Linux (x64; arm64 gets a static
+check, as there is no official Arch Linux ARM image), the AppImage on Fedora,
+and the Flatpak in its sandbox, where the bundled ffmpeg also runs every
+encoding the app uses.
 
 ## Architecture notes
 
