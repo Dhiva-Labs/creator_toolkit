@@ -66,10 +66,11 @@ flatpak run --command=bash "$APP_ID" -c '
   mkdir -p "$out"
   ff() { ffmpeg -hide_banner -y -loglevel error "$@"; }
   even="scale=trunc(iw/2)*2:trunc(ih/2)*2"
-  # Input: a 3 s H.264 + AAC clip, like a phone video.
-  ff -f lavfi -i testsrc2=size=640x360:rate=30:duration=3 \
-     -f lavfi -i sine=frequency=440:duration=3 \
-     -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest "$out/input.mp4"
+  # Input: a 3 s H.264 + AAC clip, like a phone video. Made with source
+  # filters in -filter_complex: the bundle is built without libavdevice, so
+  # it has no lavfi input device.
+  ff -filter_complex "testsrc2=size=640x360:rate=30:duration=3[v];sine=frequency=440:duration=3[a]" \
+     -map "[v]" -map "[a]" -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest "$out/input.mp4"
   in="$out/input.mp4"
   # VideoService.compress, convert (mp4/mov/mkv, webm, gif), trim
   ff -i "$in" -vf "scale=-2:min(720\,trunc(ih/2)*2)" -c:v libx264 -crf 26 -preset veryfast \
