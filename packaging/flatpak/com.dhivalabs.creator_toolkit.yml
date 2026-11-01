@@ -83,9 +83,12 @@ modules:
     cleanup:
       - /share/ffmpeg
     sources:
-      - type: archive
-        url: https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
-        sha256: 8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
+      # FFmpeg's own GitHub mirror: ffmpeg.org resets connections from CI
+      # runners ("Recv failure: Connection reset by peer").
+      - type: git
+        url: https://github.com/FFmpeg/FFmpeg.git
+        tag: n9.0.2
+        commit: 946fcce07b6dcd0331c8cc609192aeff5e1924f8
 
   - name: creator-toolkit
     buildsystem: simple
