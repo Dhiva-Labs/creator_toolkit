@@ -9,6 +9,8 @@ A simple, modern Flutter app that helps content creators optimize and convert
 media before sharing it online. Runs on **Linux (x64, arm64), Windows (x64,
 arm64), and Android** from a single codebase, fully offline.
 
+**Documentation:** step-by-step guides at [learn.dhivalabs.com](https://learn.dhivalabs.com/apps/creator-toolkit/): [install](https://learn.dhivalabs.com/apps/creator-toolkit/install) · [beginner guide](https://learn.dhivalabs.com/apps/creator-toolkit/getting-started) · [troubleshooting](https://learn.dhivalabs.com/apps/creator-toolkit/faq). New to the topic? Try the [Images and media](https://learn.dhivalabs.com/tracks/media/) learning track.
+
 ## Features
 
 - **Image tools** — compress, resize, center-crop to aspect ratio, convert
